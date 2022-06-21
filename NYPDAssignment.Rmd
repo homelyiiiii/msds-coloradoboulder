@@ -1,0 +1,153 @@
+---
+title: "NYPD Shooting Incident Data Report"
+author: "Jiayi"
+date: '2022-06-18'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+For this assignment, I will be producing a report on the NYPD Shooting Incident data following the steps in the data science process and which includes my analysis of the data.
+
+## Step 1: Importing and reading in the data
+
+I will start by importing the data from the "NYPD Shooting Incident (Historic)" csv file, obtained from [Data.gov](https://catalog.data.gov/dataset).
+
+```{r get_nypd_data}
+## Get the current data in the file
+url <-"https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+
+After I have imported the data, I will read in the data to see what is in the dataset. 
+
+```{r read_data}
+library(tidyverse)
+nypd_shooting <- read_csv(url)
+```
+
+## Step 2: Tidy and Transforming the data
+
+To see what is in the dataset, I will view the summary of the data. 
+
+```{r tidy_nypdshooting_data}
+summary(nypd_shooting)
+```
+
+Based on the summary of the nypd_shooting data, I have seen that there are 19 variables in the dataset. I would like to transform the data by keeping the variables that I am interested in studying, which is the sex of the perpetrator and victim, as well as the occurrence date of the shooting, to see which sex is more likely to be the perpetrator or victim, and whether this changes over time. I will remove the other variables. 
+
+```{r select_nypdshooting_data}
+nypd_sex = nypd_shooting %>%
+select(c("OCCUR_DATE", "PERP_SEX", "VIC_SEX"))
+summary(nypd_sex)
+```
+
+As there are certain cases where the sex of the perpetrator/victim cannot be identified and is tabulated as "NA", I will remove this result from the data since it is not useful in my analysis where I want to know which sex the perpetrator or victim is most likely to be. I have also noticed the date is not a date object, so I will have to change it to be a date object. 
+
+```{r transform_nypdshooting_data}
+library(lubridate)
+nypd_perpsex = nypd_sex %>% filter(PERP_SEX %in% c("F","M","U")) %>%
+mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+nypd_vicsex = nypd_sex %>% filter(VIC_SEX %in% c("F","M","U")) %>%
+mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+## Step 3: Visualising the data
+
+Now that I have transformed my data, I want to visualise the data of my two variables, the number of shootings by the sex of the perpetrator and the victim. I will plot bar graphs for the sex of the perpetrator and victim. 
+
+```{r bar graphs}
+nypd_grouped_perpsex = nypd_perpsex %>%
+group_by(PERP_SEX) %>%
+summarize(n())
+nypd_grouped_perpsex
+
+nypd_perpsexg <- c(371,14416,1499)
+barplot(nypd_perpsexg,
+main = "NYPD Shootings by Perpetrator Sex",
+xlab = "Perpetrator Sex",
+ylab = "Number of Shootings",
+names.arg = c("Female", "Male", "Unknown"),
+col = "darkred",
+horiz = FALSE)
+
+nypd_grouped_vicsex = nypd_vicsex %>%
+group_by(VIC_SEX) %>%
+summarize(n())
+nypd_grouped_vicsex
+
+nypd_vicsexg <- c(1710,14568,8)
+barplot(nypd_vicsexg,
+main = "NYPD Shootings by Victim Sex",
+xlab = "Victim Sex",
+ylab = "Number of Shootings",
+names.arg = c("Female", "Male", "Unknown"),
+col = "darkblue",
+horiz = FALSE)
+```
+
+From the bar graphs plotted, I can observe that majority of the shootings that occurred were perpetrated by males as compared to females. Accordingly, most of the victims were also males, although there was a ten time increase in the number of female victims as compared to female perpetrators of shootings. It would seem like a female would be more likely to be a victim of a shooting than a perpetrator, while a male seemed to be equally likely to be a victim or perpetrator of a shooting, suggesting that females may be more vulnerable to shootings in New York.
+
+Now I want to see whether the composition of perpetrators changes over time. I will thus plot a line graph for the overall number of shootings and the number of shootings where the perpetrators are male over time.
+
+```{r line graphs}
+male_perp = nypd_perpsex %>%
+filter(PERP_SEX == "M")
+
+male_perp = male_perp[order(male_perp$OCCUR_DATE), ]
+male_perp = male_perp %>%
+mutate(counted_maleperp = sequence(n()))
+
+all_perp = nypd_perpsex
+
+all_perp = all_perp[order(all_perp$OCCUR_DATE), ]
+all_perp = all_perp %>%
+mutate(counted_allperp = sequence(n()))
+
+colors = c("Male_perp" = "purple", "All_perp" = "red")
+male_perp %>%
+ggplot(aes(x=OCCUR_DATE, y=counted_maleperp))+
+geom_line(aes(color= "Male_perp"))+
+geom_line(data = all_perp, aes(x=OCCUR_DATE, y=counted_allperp, color = "All_perp")) +
+labs(title = "Number of shootings (Overall and perpetrated by males) over time", y= "Number of shootings", x = "Date")
+scale_color_manual(values=colors)
+```
+
+From the graph plotted, the shape of the line for the shootings with male perpetrators resembles the line for the overall number of shootings. The proportion of males as the perpetrators of shooting seems quite consistent over time, with the majority of shootings reported still perpetrated by males.
+
+## Step 4: Data Modelling 
+
+I would also like to create a model of the number of shootings perpetrated by males as a function of the total number of shootings. I will use a linear model. 
+
+```{r linear_model}
+allshootings = nypd_perpsex[order(nypd_perpsex$OCCUR_DATE),]
+allshootings = allshootings %>%
+group_by(PERP_SEX) %>%
+mutate(counted_allshootings = sequence(n()))
+allshootings$index = 1:nrow(allshootings)
+allshootings = allshootings %>%
+filter(PERP_SEX == 'M')
+mod = lm( counted_allshootings ~ index , data = allshootings)
+summary(mod)
+
+allshootings = allshootings %>% mutate(pred = predict(mod))
+color_mod = c("model" = 'orange', "data" = 'pink')
+allshootings %>% ggplot()+
+geom_line(aes(x = index , y = counted_allshootings, color = 'data'))+
+geom_line(aes(x= index , y= pred, color = 'model')) +
+labs(title = 'Visualization of model vs data', y = 'Shootings by males', x='All shootings', legend)
+scale_color_manual(values = color_mod)
+```
+
+The linear model predicts quite accurately the number of shootings perpetrated by males, which raises questions for me about the failure of reducing the number of shootings perpetrated by males over time. 
+
+## Step 5: Conclusion and identifying potential biases 
+
+In conclusion, from a brief analysis of this NYPD Shooting Incident dataset, I can observe that majority of the shootings that were reported were perpetrated by males as compared to females. It would seem that a female would be more likely to be a victim of a shooting than a perpetrator, as opposed to being a male.
+
+A possible bias could have been the unknown category for the perpetrator, since if the shootings were mostly reported by the victims, they may not have been able to identify what the sex of the person who shot them was, which could result in a bias in the results. Thus there were many more shootings where the perpetrator's sex was "unknown" as compared to the victim's sex being "unknown". I tried to mitigate bias by also removing the "NA" category for missing data, to avoid over reporting or under reporting the proportion of female/male perpetrators and victims of the shootings. 
+```{r end}
+sessionInfo()
+```
